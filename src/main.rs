@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
             if event.key == SOCKET_LISTENER_POLL_KEY {
                 //表示可accept
                 let (socket, addr) = listener.accept()?;
+                poller.modify(&listener, Event::readable(SOCKET_LISTENER_POLL_KEY))?;
                 log::info!("addr:{} connect", addr);
                 //设置socket为非堵塞,并产生一个此socket的key
                 socket.set_nonblocking(true)?;
@@ -52,6 +53,7 @@ fn main() -> anyhow::Result<()> {
                         len: 0,
                     },
                 );
+
             } else if let Some(client) = clients.get_mut(&event.key) {
                 //如果是client事件 判断事件状态,然后根据read,write 进行相应的处理
                 let mut disconnect = false;
