@@ -2,7 +2,7 @@ use log::LevelFilter;
 use polling::{Event, Poller};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SOCKET_LISTENER_POLL_KEY: usize = 10;
@@ -11,6 +11,7 @@ static CLIENT_KEY_MAKE: AtomicUsize = AtomicUsize::new(1000);
 fn main() -> anyhow::Result<()> {
     struct Client {
         socket: TcpStream,
+        peer_addr:SocketAddr,
         buff: [u8; 1024],
         len: usize,
     }
@@ -21,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     //初始化poll
     let poller = Poller::new()?;
     //创建socket 监听
-    let listener = TcpListener::bind("127.0.0.1:8000")?;
+    let listener = TcpListener::bind("0.0.0.0:55555")?;
     //设置为非堵塞
     listener.set_nonblocking(true)?;
     //设置socket fd 为read 事件触发 accept
@@ -37,18 +38,19 @@ fn main() -> anyhow::Result<()> {
         for event in events.iter() {
             if event.key == SOCKET_LISTENER_POLL_KEY {
                 //表示可accept
-                let (socket, addr) = listener.accept()?;
+                let (socket, peer_addr) = listener.accept()?;
                 poller.modify(&listener, Event::readable(SOCKET_LISTENER_POLL_KEY))?;
-                log::info!("addr:{} connect", addr);
+                log::info!("addr:{} connect", peer_addr);
                 //设置socket为非堵塞,并产生一个此socket的key
                 socket.set_nonblocking(true)?;
                 let client_key = CLIENT_KEY_MAKE.fetch_add(1, Ordering::Release);
                 // 异步监听此socket read,并将此socket封装成client放入map中以供事件触发时查找
-                poller.add(&socket, Event::readable(client_key))?;
+                poller.add(&socket, Event::all(client_key))?;
                 clients.insert(
                     client_key,
                     Client {
                         socket,
+                        peer_addr,
                         buff: [0; 1024],
                         len: 0,
                     },
@@ -62,26 +64,34 @@ fn main() -> anyhow::Result<()> {
                         Ok(n) => n,
                         Err(err) if err.kind() == std::io::ErrorKind::ConnectionReset => 0,
                         Err(err) => {
-                            log::error!("addr:{} error:{}", client.socket.peer_addr()?, err);
+                            log::error!("addr:{} error:{}", client.peer_addr, err);
                             0
                         }
                     };
                     client.len = size;
                     disconnect = size == 0;
-                    //读取到数据后设置成等待write以触发写入
-                    poller.modify(&client.socket, Event::writable(event.key))?;
-                } else if event.writable {
+                    // //读取到数据后设置成等待write以触发写入
+                    // poller.modify(&client.socket, Event::writable(event.key))?;
+                }
+
+                if event.writable && client.len>0 {
+
                     if let Err(err) = client.socket.write(&client.buff[..client.len]) {
-                        log::error!("addr:{} error:{}", client.socket.peer_addr()?, err);
+                        log::error!("addr:{} error:{}", client.peer_addr, err);
                         disconnect = true;
                     }
-                    //发送后设置成等待read
-                    poller.modify(&client.socket, Event::readable(event.key))?;
+
+                    client.len=0;
+                    // //发送后设置成等待read
+                    // poller.modify(&client.socket, Event::readable(event.key))?;
                 }
+
                 if disconnect {
                     let client = clients.remove(&event.key).unwrap();
                     poller.delete(&client.socket)?;
-                    log::info!("addr:{} disconnect", client.socket.peer_addr()?);
+                    log::info!("addr:{} disconnect", client.peer_addr);
+                }else{
+                    poller.modify(&client.socket, Event::all(event.key))?;
                 }
             }
         }
