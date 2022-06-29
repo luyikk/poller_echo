@@ -70,8 +70,6 @@ fn main() -> anyhow::Result<()> {
                     };
                     client.len = size;
                     disconnect = size == 0;
-                    // //读取到数据后设置成等待write以触发写入
-                    // poller.modify(&client.socket, Event::writable(event.key))?;
                 }
 
                 if event.writable && client.len>0 {
@@ -82,8 +80,6 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     client.len=0;
-                    // //发送后设置成等待read
-                    // poller.modify(&client.socket, Event::readable(event.key))?;
                 }
 
                 if disconnect {
