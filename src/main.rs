@@ -73,12 +73,10 @@ fn main() -> anyhow::Result<()> {
                 }
 
                 if event.writable && client.len>0 {
-
                     if let Err(err) = client.socket.write(&client.buff[..client.len]) {
                         log::error!("addr:{} error:{}", client.peer_addr, err);
                         disconnect = true;
                     }
-
                     client.len=0;
                 }
 
